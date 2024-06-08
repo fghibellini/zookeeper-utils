@@ -2,20 +2,37 @@ import zlib
 import struct
 import json
 from base64 import b64encode
+import argparse
 
-decode_data_as_string = False
-
-# The zookeeper snapshotting modules use the DataOutput::writeInt() and similar to serialize numbers. According to their documentation:
+# This module was written by following the serialization logic of `FileSnap::serialize()`[1].
 #
-#    Writes an int value, which is comprised of four bytes, to the output stream. The byte values to be written, in the order shown, are:
-#       (byte)(0xff & (v >> 24))
-#       (byte)(0xff & (v >> 16))
-#       (byte)(0xff & (v >>  8))
-#       (byte)(0xff & v)
-#
-# The binary numbers are therefore BigEndian integers in two's complement format.
+# [1] https://github.com/apache/zookeeper/blob/66202cb764c203f64b954a917e421be57d2ae67a/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/FileSnap.java#L242
 
 class SnapshotReader:
+    '''
+    # GENERAL OVERVIEW OF THE SERIALIZATION STREAM 
+
+    The output of data in `FileSnap.serialize()` is handled by `BinaryOutputArchive` [1] which
+    internally use the Java standard class DataOutputStream [2].
+    The output is then streamed through a CheckedOutputStream [3] which computes an Adler32
+    checksum in a streaming fashion.
+
+    # INTEGER NUMBERS
+    
+    All the ints and longs are serialized through methods like `DataOutput::writeInt()` and similar
+    which results in BigEndian integers using two's complement representation.
+
+    # STRINGS AND BUFFERS
+
+    Strings and byte buffers use custom logic specified in the Jute module [4] which consists of outputting
+    the integer length (using the same logic as for other integers) followed by the actual contents.
+    A length of -1 signals a null value.
+    
+    [1] https://github.com/apache/zookeeper/blob/66202cb764c203f64b954a917e421be57d2ae67a/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/FileSnap.java#L249
+    [2] https://docs.oracle.com/javase%2F8%2Fdocs%2Fapi%2F%2F/java/io/DataOutputStream.html
+    [3] https://github.com/apache/zookeeper/blob/66202cb764c203f64b954a917e421be57d2ae67a/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/FileSnap.java#L248
+    [4] https://github.com/apache/zookeeper/blob/66202cb764c203f64b954a917e421be57d2ae67a/zookeeper-jute/src/main/java/org/apache/jute/BinaryOutputArchive.java#L113
+    '''
 
     def __init__(self, file_reader):
         self.input_stream = file_reader
@@ -67,7 +84,7 @@ class SnapshotReader:
             raise RuntimeError(f"{label} not followed by '/'!")
         return checksum
 
-def read_zookeeper_snapshot(file_path):
+def read_zookeeper_snapshot(file_path, decode_data_as_string):
     """
     Reads a Zookeeper snapshot file, computes Adler32 checksums for each chunk of data,
     and parses the data into a dictionary.
@@ -198,11 +215,71 @@ def read_zookeeper_snapshot(file_path):
 # except ValueError as e:
 #     print(f"Value error: {e}")
 
+def validate_adler32(file_path):
+    # Define the buffer size for reading the file in chunks
+    buffer_size = 65536  # 64KB
+
+    # Initialize the Adler-32 checksum
+    adler32_checksum = 1  # Starting value for Adler-32 checksum
+
+    try:
+        with open(file_path, 'rb') as f:
+            # Move to the end of the file - 13 Bytes
+            # - 8 bytes of Adler32 checksum
+            # - 4 bytes for the length of a string
+            # - 1 byte for the string '/'
+            f.seek(-13, 2)  
+            end_of_checksummed_section = f.tell()
+
+            # parse the checksum serialized in the snapshot file
+            checksum_bytes = f.read(8)
+            if len(checksum_bytes) < 8:
+                raise RuntimeError(f"File is too small!")
+            expected_checksum, = struct.unpack('>q', checksum_bytes) # TODO SIGNED long?
+            
+            f.seek(0)  # Move back to the start of the file
+
+            while f.tell() < end_of_checksummed_section:
+                read_size = min(buffer_size, end_of_checksummed_section - f.tell())
+                data = f.read(read_size)
+                adler32_checksum = zlib.adler32(data, adler32_checksum)
+        
+        print(f"Expected Adler-32 checksum: {expected_checksum}")
+        print(f"Computed Adler-32 checksum: {adler32_checksum}")
+        if expected_checksum == adler32_checksum:
+            print(f"All OK")
+        else:
+            raise RuntimeError(f"FILE CORRUPTED! (Checksum mismatch)")
+
+    except IOError as e:
+        print(f"Error reading file: {e}")
+        return None
 
 def main():
-    file_path = '/Users/fghibellini/Downloads/snapshot.95e000ebfc1'  # Replace with the actual path to the snapshot file
-    result = read_zookeeper_snapshot(file_path)
-    print(json.dumps(result, indent=4))
+    parser = argparse.ArgumentParser(description='Zookeeper snapshot utilities')
+    subparsers = parser.add_subparsers(required=True)
+
+    parser_parse = subparsers.add_parser('parse', help='parse a snapshot file')
+    parser_parse.set_defaults(subcmd="parse")
+    parser_parse.add_argument('filename', nargs=1, help='path to the snapshot file')
+    parser_parse.add_argument('--string-data', dest='string_data', action='store_true',
+                        default=False,
+                        help='decode the znode\'s data as utf-8 strings')
+
+    parser_parse = subparsers.add_parser('validate', help='computes an Adler32 checksum and compares it to the one at the end of the file')
+    parser_parse.set_defaults(subcmd="validate")
+    parser_parse.add_argument('filename', nargs=1, help='path to the snapshot file')
+
+    args = parser.parse_args()
+
+    if args.subcmd == 'parse':
+        decode_data_as_string = args.string_data
+        file_path = args.filename[0]
+        result = read_zookeeper_snapshot(file_path, decode_data_as_string)
+        print(json.dumps(result, indent=4))
+    elif args.subcmd == 'validate':
+        file_path = args.filename[0]
+        validate_adler32(file_path)
 
 if __name__ == '__main__':
     main()

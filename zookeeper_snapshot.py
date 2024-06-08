@@ -19,7 +19,10 @@ class SnapshotReader:
 
     def __init__(self, file_reader):
         self.input_stream = file_reader
-        self.checksum = 0 # initial value of Adler32 checksum
+        self.checksum = 1 # initial value of Adler32 checksum
+
+    def eof(self):
+        return len(self.input_stream.peek(1)) == 0
 
     def read_int(self, label):
         bytes = self.input_stream.read(4)
@@ -143,7 +146,31 @@ def read_zookeeper_snapshot(file_path):
                     'pzxid': pzxid,
                 }
             }
-            nodes.append(node)
+            # TODO
+            # nodes.append(node)
+
+        # first checksum following the tree nodes
+        computed_checksum1 = snapshot_reader.checksum
+        checksum1 = snapshot_reader.read_long('CHECKSUM_1')
+        if checksum1 != computed_checksum1:
+            raise RuntimeError(f"CHECKSUM_1 MISMATCH! computed = {computed_checksum1} expected {checksum1}")
+        if '/' != snapshot_reader.read_string('CHECKSUM_1.trailing_slash'):
+            raise RuntimeError(f"CHECKSUM_1 not followed by '/'!")
+
+        # TODO digest output is configurable
+        # digest
+        zxid = snapshot_reader.read_long("zxid")
+        digest_version = snapshot_reader.read_int("digest_version")
+        digest = snapshot_reader.read_long("digest")
+        computed_checksum2 = snapshot_reader.checksum
+        checksum2 = snapshot_reader.read_long('CHECKSUM_2')
+        if checksum2 != computed_checksum2:
+            raise RuntimeError(f"CHECKSUM_2 MISMATCH! computed = {computed_checksum2} expected {checksum2}")
+        if '/' != snapshot_reader.read_string('CHECKSUM_2.trailing_slash'):
+            raise RuntimeError(f"CHECKSUM_2 not followed by '/'!")
+
+        if not snapshot_reader.eof():
+            raise RuntimeError(f"Unexpected trailing data at the end of snapshot file!")
 
         return {
             'header': {
@@ -153,7 +180,12 @@ def read_zookeeper_snapshot(file_path):
             },
             'sessions': sessions,
             'ACLs': acl_cache,
-            'nodes': nodes
+            'nodes': nodes,
+            'digest': {
+                'zxid': zxid,
+                'digest_version': digest_version,
+                'digest': digest
+            }
         }
                 
 # except IOError as e:

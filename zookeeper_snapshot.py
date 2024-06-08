@@ -1,7 +1,9 @@
 import zlib
 import struct
 import json
+from base64 import b64encode
 
+decode_data_as_string = False
 
 # The zookeeper snapshotting modules use the DataOutput::writeInt() and similar to serialize numbers. According to their documentation:
 #
@@ -37,12 +39,24 @@ class SnapshotReader:
 
     def read_string(self, label):
         val_len = self.read_int(f"{label}.length")
+        if val_len == -1:
+            return None
         bytes = self.input_stream.read(val_len)
         if len(bytes) < val_len:
             raise ValueError(f"Tried to parse string bytes for {label} but encountered EOF")
         self.checksum = zlib.adler32(bytes, self.checksum)
         val = bytes.decode("utf-8")
         return val
+
+    def read_buffer(self, label):
+        val_len = self.read_int(f"{label}.length")
+        if val_len == -1:
+            return None
+        bytes = self.input_stream.read(val_len)
+        if len(bytes) < val_len:
+            raise ValueError(f"Tried to parse buffer bytes for {label} but encountered EOF")
+        self.checksum = zlib.adler32(bytes, self.checksum)
+        return bytes
 
 
 def read_zookeeper_snapshot(file_path):
@@ -53,10 +67,6 @@ def read_zookeeper_snapshot(file_path):
     :param file_path: Path to the Zookeeper snapshot file
     :return: A tuple containing a list of Adler32 checksums and the parsed data dictionary
     """
-    checksum = 0
-    checksums = []
-    nodes = {}
-    chunk_size = 1024  # Adjust the chunk size as needed
 
     # try:
     with open(file_path, 'rb') as file:
@@ -86,7 +96,6 @@ def read_zookeeper_snapshot(file_path):
             acl_index = snapshot_reader.read_long('acl_index')
             acl_list_vector_len = snapshot_reader.read_int('acl_list_vector')
             acl_list = None
-            # TODO acl_list_vector_len == -1 ???
             if acl_list_vector_len != -1:
                 acl_list = []
                 for j in range(acl_list_vector_len):
@@ -102,28 +111,40 @@ def read_zookeeper_snapshot(file_path):
                     })
             acl_cache[acl_index] = acl_list
 
-        #while True:
-        #    chunk = file.read(chunk_size)
-        #    if not chunk:
-        #        break
-        #    checksum = zlib.adler32(chunk)
-        #    checksums.append(checksum)
-        #    
-        #    offset = 0
-        #    while offset < len(chunk):
-        #        if len(chunk) - offset < 16:
-        #            break  # Not enough data for a full node header
+        nodes = []
+        while True:
+            node_path = snapshot_reader.read_string("node_path")
+            if node_path == '/':
+                break
+            node_data = snapshot_reader.read_string("node_data") if decode_data_as_string else snapshot_reader.read_buffer("node_data")
+            node_acl = snapshot_reader.read_long("node_acl")
+            czxid = snapshot_reader.read_long("node_czxid")
+            mzxid = snapshot_reader.read_long("node_mzxid")
+            ctime = snapshot_reader.read_long("node_ctime")
+            mtime = snapshot_reader.read_long("node_mtime")
+            node_version = snapshot_reader.read_int("node_version")
+            cversion = snapshot_reader.read_int("node_cversion")
+            aversion = snapshot_reader.read_int("node_aversion")
+            ephemeralOwner = snapshot_reader.read_long("node_ephemeralOwner")
+            pzxid = snapshot_reader.read_long("node_pzxid")
+            node = {
+                'path': node_path,
+                'data': node_data if decode_data_as_string else (f"data:;base64,{b64encode(node_data).decode('utf-8')}" if node_data else None),
+                'acl': node_acl,
+                'stat': {
+                    'czxid': czxid,
+                    'mzxid': mzxid,
+                    'ctime': ctime,
+                    'mtime': mtime,
+                    'version': node_version,
+                    'cversion': cversion,
+                    'aversion': aversion,
+                    'ephemeralOwner': ephemeralOwner,
+                    'pzxid': pzxid,
+                }
+            }
+            nodes.append(node)
 
-        #        node_id, parent_id, data_length = struct.unpack('qqi', chunk[offset:offset + 20])
-        #        offset += 20
-        #        
-        #        if len(chunk) - offset < data_length:
-        #            break  # Not enough data for the full node data
-
-        #        data = chunk[offset:offset + data_length].decode('utf-8')
-        #        offset += data_length
-
-        #        nodes[node_id] = {'parent_id': parent_id, 'data': data}
         return {
             'header': {
                 'magic': magic,
@@ -131,7 +152,8 @@ def read_zookeeper_snapshot(file_path):
                 'db_id': db_id
             },
             'sessions': sessions,
-            'ACLs': acl_cache
+            'ACLs': acl_cache,
+            'nodes': nodes
         }
                 
 # except IOError as e:

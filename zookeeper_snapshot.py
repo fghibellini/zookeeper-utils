@@ -61,6 +61,11 @@ class SnapshotReader:
         self.checksum = zlib.adler32(bytes, self.checksum)
         return bytes
 
+    def read_checksum(self, label):
+        checksum = self.read_long(label)
+        if '/' != self.read_string(f"{label}.trailing_slash"):
+            raise RuntimeError(f"{label} not followed by '/'!")
+        return checksum
 
 def read_zookeeper_snapshot(file_path):
     """
@@ -146,29 +151,27 @@ def read_zookeeper_snapshot(file_path):
                     'pzxid': pzxid,
                 }
             }
-            # TODO
-            # nodes.append(node)
+            nodes.append(node)
 
         # first checksum following the tree nodes
         computed_checksum1 = snapshot_reader.checksum
-        checksum1 = snapshot_reader.read_long('CHECKSUM_1')
+        checksum1 = snapshot_reader.read_checksum("CHECKSUM_1")
         if checksum1 != computed_checksum1:
             raise RuntimeError(f"CHECKSUM_1 MISMATCH! computed = {computed_checksum1} expected {checksum1}")
-        if '/' != snapshot_reader.read_string('CHECKSUM_1.trailing_slash'):
-            raise RuntimeError(f"CHECKSUM_1 not followed by '/'!")
 
-        # TODO digest output is configurable
         # digest
+        # TODO digest output is configurable
         zxid = snapshot_reader.read_long("zxid")
         digest_version = snapshot_reader.read_int("digest_version")
         digest = snapshot_reader.read_long("digest")
+
+        # second checksum following the digest
         computed_checksum2 = snapshot_reader.checksum
-        checksum2 = snapshot_reader.read_long('CHECKSUM_2')
+        checksum2 = snapshot_reader.read_checksum("CHECKSUM_2")
         if checksum2 != computed_checksum2:
             raise RuntimeError(f"CHECKSUM_2 MISMATCH! computed = {computed_checksum2} expected {checksum2}")
-        if '/' != snapshot_reader.read_string('CHECKSUM_2.trailing_slash'):
-            raise RuntimeError(f"CHECKSUM_2 not followed by '/'!")
 
+        # expected EOF
         if not snapshot_reader.eof():
             raise RuntimeError(f"Unexpected trailing data at the end of snapshot file!")
 

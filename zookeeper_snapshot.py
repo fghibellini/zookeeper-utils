@@ -13,6 +13,38 @@ import json
 #
 # The binary numbers are therefore BigEndian integers in two's complement format.
 
+class SnapshotReader:
+
+    def __init__(self, file_reader):
+        self.input_stream = file_reader
+        self.checksum = 0 # initial value of Adler32 checksum
+
+    def read_int(self, label):
+        bytes = self.input_stream.read(4)
+        if len(bytes) < 4:
+            raise ValueError(f"Tried to parse integer {label} but encountered EOF")
+        self.checksum = zlib.adler32(bytes, self.checksum)
+        val, = struct.unpack('>i', bytes)
+        return val
+
+    def read_long(self, label):
+        bytes = self.input_stream.read(8)
+        if len(bytes) < 8:
+            raise ValueError(f"Tried to parse long {label} but encountered EOF")
+        self.checksum = zlib.adler32(bytes, self.checksum)
+        val, = struct.unpack('>q', bytes)
+        return val
+
+    def read_string(self, label):
+        val_len = self.read_int(f"{label}.length")
+        bytes = self.input_stream.read(val_len)
+        if len(bytes) < val_len:
+            raise ValueError(f"Tried to parse string bytes for {label} but encountered EOF")
+        self.checksum = zlib.adler32(bytes, self.checksum)
+        val = bytes.decode("utf-8")
+        return val
+
+
 def read_zookeeper_snapshot(file_path):
     """
     Reads a Zookeeper snapshot file, computes Adler32 checksums for each chunk of data,
@@ -28,105 +60,47 @@ def read_zookeeper_snapshot(file_path):
 
     # try:
     with open(file_path, 'rb') as file:
-        header_bytes = file.read(16)
-        if len(header_bytes) < 16:
-            raise ValueError("Invalid snapshot file: header too short")
-        checksums.append(zlib.adler32(header_bytes))
-        
-        _magic, version, db_id = struct.unpack('>4siq', header_bytes)
-        magic = _magic.decode("utf-8")
-        if magic != "ZKSN":
-            raise RuntimeError(f"Invalid file magic. Expected ZKSN but got : {_magic}")
+        snapshot_reader = SnapshotReader(file)
+
+        magic = snapshot_reader.read_int('magic')
+        version = snapshot_reader.read_int('version')
+        db_id = snapshot_reader.read_long('db_id')
+        if magic != 1514885966:
+            raise RuntimeError(f"Invalid file magic. Expected 1514885966 (\"ZKSN\") but got : {magic}")
         if version != 2:
             raise RuntimeError(f"Invalid snapshot version. Expected 2 but got : {version}")
         
-        # print(f"Magic Number: {magic}, Version: {version}, DB_ID: {db_id}")
-
-        session_count_bytes = file.read(4)
-        if len(session_count_bytes) < 4:
-            raise ValueError("Expected session count but reached EOF")
-        checksums.append(zlib.adler32(session_count_bytes, checksum))
-        session_count, = struct.unpack('>i', session_count_bytes)
-        print(f"session count: {session_count}")
+        session_count = snapshot_reader.read_int('session_count')
         sessions = []
         for i in range(session_count):
-            session_bytes = file.read(12)
-            if len(session_bytes) < 12:
-                raise ValueError("Expected session of 12 bytes but reached EOF")
-            checksums.append(zlib.adler32(session_bytes, checksum))
-            session_id, session_timeout = struct.unpack('>qi', session_bytes)
+            session_id = snapshot_reader.read_long('session_id')
+            session_timeout = snapshot_reader.read_int('session_timeout')
             sessions.append({
                 'id': session_id,
                 'timeout': session_timeout
             })
 
-        acl_cloned_long_keymap_size_bytes = file.read(4)
-        if len(acl_cloned_long_keymap_size_bytes) < 4:
-            raise ValueError("Expected ACL cloned long keymap size but reached EOF")
-        checksums.append(zlib.adler32(acl_cloned_long_keymap_size_bytes, checksum))
-        cloned_long_keymap_size, = struct.unpack('>i', acl_cloned_long_keymap_size_bytes)
-        print(f"acl_cloned_long_keymap_size: {acl_cloned_long_keymap_size_bytes}")
-        acl_lists = {}
-        for i in range(cloned_long_keymap_size):
-            # ac_list_id
-            acl_index_bytes = file.read(8)
-            if len(acl_index_bytes) < 8:
-                raise ValueError("Expected ACL index but reached EOF")
-            checksums.append(zlib.adler32(acl_index_bytes, checksum))
-            acl_index, = struct.unpack('>q', acl_index_bytes)
-            # ac_list_vector
-            acl_list_vector_len_bytes = file.read(4)
-            if len(acl_list_vector_len_bytes) < 4:
-                raise ValueError("Expected ACL list vector length but got EOF")
-            checksums.append(zlib.adler32(acl_list_vector_len_bytes, checksum))
-            acl_list_vector_len, = struct.unpack('>i', acl_list_vector_len_bytes)
+        acl_cache_size = snapshot_reader.read_int('acl_cache_size')
+        acl_cache = {}
+        for i in range(acl_cache_size):
+            acl_index = snapshot_reader.read_long('acl_index')
+            acl_list_vector_len = snapshot_reader.read_int('acl_list_vector')
+            acl_list = None
             # TODO acl_list_vector_len == -1 ???
-            acl_list = []
-            acl_lists[acl_index] = acl_list
-            for j in range(acl_list_vector_len):
-                # perms
-                perms_bytes = file.read(4)
-                if len(perms_bytes) < 4:
-                    raise ValueError("Expected ACL perms but got EOF")
-                checksums.append(zlib.adler32(perms_bytes, checksum))
-                perms, = struct.unpack('>i', perms_bytes)
-                # scheme
-                scheme_length_bytes = file.read(4)
-                if len(scheme_length_bytes) < 4:
-                    raise ValueError("Expected scheme length but got EOF")
-                checksums.append(zlib.adler32(scheme_length_bytes, checksum))
-                scheme_length, = struct.unpack('>i', scheme_length_bytes)
-                scheme = None
-                if scheme_length != -1:
-                    scheme_bytes = file.read(scheme_length)
-                    if len(scheme_bytes) < scheme_length:
-                        raise ValueError("Expected scheme bytes but got EOF")
-                    checksums.append(zlib.adler32(scheme_bytes, checksum))
-                    scheme = scheme_bytes.decode("utf-8")
-                # id
-                acl_id_length_bytes = file.read(4)
-                if len(acl_id_length_bytes) < 4:
-                    raise ValueError("Expected acl_id_bytes but got EOF")
-                checksums.append(zlib.adler32(acl_id_length_bytes, checksum))
-                acl_id_length, = struct.unpack('>i', acl_id_length_bytes)
-                acl_id = None
-                if acl_id_length != -1:
-                    acl_id_bytes = file.read(acl_id_length)
-                    if len(acl_id_bytes) < acl_id_length:
-                        raise ValueError("Expected acl_id_bytes but got EOF")
-                    checksums.append(zlib.adler32(acl_id_bytes, checksum))
-                    acl_id = acl_id_bytes.decode("utf-8")
-                acl_list.append({
-                    'perms': perms,
-                    'id': {
-                        'scheme': scheme,
-                        'id': acl_id
-                    }
-                })
-                
-
-
-
+            if acl_list_vector_len != -1:
+                acl_list = []
+                for j in range(acl_list_vector_len):
+                    perms = snapshot_reader.read_int('acl_perms')
+                    scheme = snapshot_reader.read_string('acl_scheme')
+                    acl_id = snapshot_reader.read_string('acl_id')
+                    acl_list.append({
+                        'perms': perms,
+                        'id': {
+                            'scheme': scheme,
+                            'id': acl_id
+                        }
+                    })
+            acl_cache[acl_index] = acl_list
 
         #while True:
         #    chunk = file.read(chunk_size)
@@ -157,7 +131,7 @@ def read_zookeeper_snapshot(file_path):
                 'db_id': db_id
             },
             'sessions': sessions,
-            'ACLs': acl_lists
+            'ACLs': acl_cache
         }
                 
 # except IOError as e:

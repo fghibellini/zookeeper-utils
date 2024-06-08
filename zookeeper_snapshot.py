@@ -31,6 +31,24 @@ def read_zookeeper_snapshot(file_path):
             
             # print(f"Magic Number: {magic}, Version: {version}, DB_ID: {db_id}")
 
+            session_count_bytes = file.read(4)
+            if len(session_count_bytes) < 4:
+                raise ValueError("Expected session count but reached EOF")
+            checksums.append(zlib.adler32(session_count_bytes, checksum))
+            session_count, = struct.unpack('>I', session_count_bytes)
+            print(f"session count: {session_count}")
+            sessions = []
+            for i in range(session_count):
+                session_bytes = file.read(12)
+                if len(session_bytes) < 12:
+                    raise ValueError("Expected session of 12 bytes but reached EOF")
+                checksums.append(zlib.adler32(session_bytes, checksum))
+                session_id, session_timeout = struct.unpack('>QI', session_bytes)
+                sessions.append({
+                    'id': session_id,
+                    'timeout': session_timeout
+                })
+
             #while True:
             #    chunk = file.read(chunk_size)
             #    if not chunk:
@@ -58,7 +76,8 @@ def read_zookeeper_snapshot(file_path):
                     'magic': magic,
                     'version': version,
                     'db_id': db_id
-                }
+                },
+                'sessions': sessions
             }
                     
     except IOError as e:

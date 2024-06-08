@@ -37,6 +37,8 @@ options:
 ### `validate`
 
 Computes Adler32 checksum of the snapshot and validates that it matches the one persisted at the end of the file.
+This can be used to check that the snapshot written fully - a common problem given that ZooKeeper makes no attempt
+at not exposing the snapshot files as they are beeing generated.
 
 **Significantly faster than parsing the file.**
 

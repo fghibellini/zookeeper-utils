@@ -3,6 +3,9 @@ import struct
 import json
 from base64 import b64encode
 import argparse
+import fnmatch
+from pathlib import PurePosixPath
+from filter_globs import path_matches_glob
 
 # This module was written by following the serialization logic of `FileSnap::serialize()`[1].
 #
@@ -84,7 +87,17 @@ class SnapshotReader:
             raise RuntimeError(f"{label} not followed by '/'!")
         return checksum
 
-def read_zookeeper_snapshot(file_path, decode_data_as_string):
+def format_znode_data(node_data, format):
+    if node_data == None:
+        return None
+    if format == "text":
+        return node_data.decode("utf-8")
+    if format == "base64":
+        return b64encode(node_data).decode('utf-8')
+    if format == "json":
+        return json.loads(node_data.decode("utf-8")) if len(node_data) > 0 else None
+
+def read_zookeeper_snapshot(file_path, znode_data_format, znode_path_filter):
     """
     Reads a Zookeeper snapshot file, computes Adler32 checksums for each chunk of data,
     and parses the data into a dictionary.
@@ -141,7 +154,7 @@ def read_zookeeper_snapshot(file_path, decode_data_as_string):
             node_path = snapshot_reader.read_string("node_path")
             if node_path == '/':
                 break
-            node_data = snapshot_reader.read_string("node_data") if decode_data_as_string else snapshot_reader.read_buffer("node_data")
+            node_data = snapshot_reader.read_buffer("node_data")
             node_acl = snapshot_reader.read_long("node_acl")
             czxid = snapshot_reader.read_long("node_czxid")
             mzxid = snapshot_reader.read_long("node_mzxid")
@@ -152,9 +165,11 @@ def read_zookeeper_snapshot(file_path, decode_data_as_string):
             aversion = snapshot_reader.read_int("node_aversion")
             ephemeralOwner = snapshot_reader.read_long("node_ephemeralOwner")
             pzxid = snapshot_reader.read_long("node_pzxid")
+            if not znode_path_filter(node_path):
+                continue
             node = {
                 'path': node_path,
-                'data': node_data if decode_data_as_string else (f"data:;base64,{b64encode(node_data).decode('utf-8')}" if node_data else None),
+                'data': format_znode_data(node_data, znode_data_format),
                 'acl': node_acl,
                 'stat': {
                     'czxid': czxid,
@@ -255,30 +270,41 @@ def validate_adler32(file_path):
         print(f"Error reading file: {e}")
         return None
 
+def path_include_patterns_to_filter_func(patterns):
+    def asterisk_whitelist_func(path): # optimized version for no filter
+        return True
+    def generic_whitelist_func(path):
+        return any(path_matches_glob(path, b) for b in patterns)
+    return asterisk_whitelist_func if patterns == ["*"] else generic_whitelist_func
+
 def main():
     parser = argparse.ArgumentParser(description='Zookeeper snapshot utilities')
     subparsers = parser.add_subparsers(required=True)
 
     parser_parse = subparsers.add_parser('parse', help='parse a snapshot file')
     parser_parse.set_defaults(subcmd="parse")
-    parser_parse.add_argument('filename', nargs=1, help='path to the snapshot file')
-    parser_parse.add_argument('--string-data', dest='string_data', action='store_true',
-                        default=False,
-                        help='decode the znode\'s data as utf-8 strings')
+    parser_parse.add_argument('filename', help='path to the snapshot file')
+    parser_parse.add_argument('--path-include', dest='znode_path_include', nargs='*', help="Paths to include. Use * as wildcard value.")
+    parser_parse.add_argument('--data-format', dest='znode_data_format', action='store',
+    			choices=["base64", "text", "json"],
+                        default="text",
+                        help='format used to output the znode\'s data. "text" will parse the data as UTF-8 strings. Keep in mind that ALL the znodes must be encodable in this format so if you specify "json" you need to make sure that all your znodes contain valid JSON. See --path-include to filter.')
 
     parser_parse = subparsers.add_parser('validate', help='computes an Adler32 checksum and compares it to the one at the end of the file')
     parser_parse.set_defaults(subcmd="validate")
-    parser_parse.add_argument('filename', nargs=1, help='path to the snapshot file')
+    parser_parse.add_argument('filename', help='path to the snapshot file')
 
     args = parser.parse_args()
 
     if args.subcmd == 'parse':
-        decode_data_as_string = args.string_data
-        file_path = args.filename[0]
-        result = read_zookeeper_snapshot(file_path, decode_data_as_string)
+        znode_data_format = args.znode_data_format
+        file_path = args.filename
+        path_whitelist = args.znode_path_include if len(args.znode_path_include) > 0 else ["*"]
+        whitelist_func = path_include_patterns_to_filter_func(path_whitelist)
+        result = read_zookeeper_snapshot(file_path, znode_data_format, whitelist_func)
         print(json.dumps(result, indent=4))
     elif args.subcmd == 'validate':
-        file_path = args.filename[0]
+        file_path = args.filename
         validate_adler32(file_path)
 
 if __name__ == '__main__':

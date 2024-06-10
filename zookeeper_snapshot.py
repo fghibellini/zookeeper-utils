@@ -3,8 +3,6 @@ import struct
 import json
 from base64 import b64encode
 import argparse
-import fnmatch
-from pathlib import PurePosixPath
 from filter_globs import path_matches_glob
 
 # This module was written by following the serialization logic of `FileSnap::serialize()`[1].
@@ -117,6 +115,8 @@ def read_zookeeper_snapshot(file_path, znode_data_format, znode_path_filter):
             raise RuntimeError(f"Invalid file magic. Expected 1514885966 (\"ZKSN\") but got : {magic}")
         if version != 2:
             raise RuntimeError(f"Invalid snapshot version. Expected 2 but got : {version}")
+        if db_id != -1:
+            raise RuntimeError(f"Invalid DB_ID. Expected -1 but got : {db_id}")
         
         session_count = snapshot_reader.read_int('session_count')
         sessions = []

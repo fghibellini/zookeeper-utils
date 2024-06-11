@@ -1,9 +1,12 @@
+import re
 import zlib
 import struct
 import json
 from base64 import b64encode
 import argparse
 from filter_globs import path_matches_glob
+from zookeeper_txlog import list_txlog_files, get_transaction_ranges
+from pathlib import Path
 
 # This module was written by following the serialization logic of `FileSnap::serialize()`[1].
 #
@@ -278,6 +281,10 @@ def path_include_patterns_to_filter_func(patterns):
     return asterisk_whitelist_func if patterns == ["*"] else generic_whitelist_func
 
 def main():
+
+    print(validate_snapshot_complete("/Users/fghibellini/Downloads/snapshot.95e000ebfc1", "/Users/fghibellini/Downloads"))
+    return
+
     parser = argparse.ArgumentParser(description='Zookeeper snapshot utilities')
     subparsers = parser.add_subparsers(required=True)
 
@@ -306,6 +313,26 @@ def main():
     elif args.subcmd == 'validate':
         file_path = args.filename
         validate_adler32(file_path)
+
+def parse_filename(basename):
+    if not re.match(r'^snapshot\.[0-9a-fA-F]+$', basename):
+        return None
+    _,zxid = basename.split(".")
+    return int(zxid, 16)
+
+def is_subrange(contained, container):
+    a,b = contained
+    c,d = container
+    return a >= c and b <= d
+
+def validate_snapshot_complete(snapshot_filepath, txlog_dir):
+    parsed_snapshot = read_zookeeper_snapshot(snapshot_filepath, 'base64', lambda f: False)
+    snapshot_tx_range = (parse_filename(Path(snapshot_filepath).name), parsed_snapshot['digest']['zxid'])
+    print(f"snapshot_tx_range: {snapshot_tx_range}")
+    log_files = list_txlog_files(txlog_dir)
+    available_continuous_tx_ranges = get_transaction_ranges(log_files)
+    print(f"available_continuous_tx_ranges: {available_continuous_tx_ranges}")
+    return any(is_subrange(snapshot_tx_range, r) for r in available_continuous_tx_ranges)
 
 if __name__ == '__main__':
     main()

@@ -2,6 +2,8 @@ import zlib
 import json
 import struct
 from enum import Enum
+import pathlib
+import re
 
 # Normally the read() function on a stream will return only the data that can be retrieved with a single fetch.
 # We typically know exactly how much data we need to proceed so we use this wrapper instead.
@@ -301,9 +303,44 @@ def read_zookeeper_txlog(file_path):
             # print(json.dumps(tx_rec, indent=4))
             log_transactions.append(tx_rec)
         #print(f"Read {len(log_transactions)} transactions!")
-        print(json.dumps(log_transactions, indent=4))
+        # print(json.dumps(log_transactions, indent=4))
+        return log_transactions
 
             
+def list_txlog_files(dir):
+    dir_path = pathlib.Path(dir)
+    def parse_filename(basename):
+        if not re.match(r'^log\.[0-9a-fA-F]+$', basename):
+            return None
+        _,zxid = basename.split(".")
+        return int(zxid, 16)
+    files = ((p, parse_filename(p.name)) for p in dir_path.iterdir())
+    unsorted = [ (p,zxid) for (p,zxid) in files if zxid != None ]
+    sorted_result = sorted(unsorted, key = lambda x: x[1])
+    print(sorted_result)
+    return [ str(p) for (p,zxid) in sorted_result ]
+
+def get_zxid_range(parsed_txlog):
+    if len(parsed_txlog) < 1:
+        return None
+    return (parsed_txlog[0]['header']['zxid'], parsed_txlog[-1]['header']['zxid'])
+
+def get_transaction_ranges(files):
+    ranges = [ r for r in (get_zxid_range(read_zookeeper_txlog(file)) for file in files) if r != None ]
+    if not ranges:
+        return []
+    merged = [ranges[0]]
+    for start,end in ranges[1:]:
+        top_start,top_end = merged[-1]
+        if start == top_end + 1:
+            merged[-1] = (top_start, end)
+        else:
+            merged.append((start,end))
+    return merged
         
 
-read_zookeeper_txlog("/Users/fghibellini/Downloads/log.95e000d8b9e")
+if __name__ == '__main__':
+    tx_log_files = list_txlog_files("/Users/fghibellini/Downloads")
+    print(tx_log_files)
+    print(get_transaction_ranges(tx_log_files))
+    # read_zookeeper_txlog("/Users/fghibellini/Downloads/log.95e000d8b9e")

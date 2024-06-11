@@ -282,7 +282,7 @@ def path_include_patterns_to_filter_func(patterns):
 
 def main():
 
-    print(validate_snapshot_complete("/Users/fghibellini/Downloads/snapshot.95e000ebfc1", "/Users/fghibellini/Downloads"))
+    print(json.dumps(validate_snapshot_complete("/Users/fghibellini/Downloads/snapshot.95e000ebfc1", "/Users/fghibellini/Downloads"), indent=4))
     return
 
     parser = argparse.ArgumentParser(description='Zookeeper snapshot utilities')
@@ -327,12 +327,38 @@ def is_subrange(contained, container):
 
 def validate_snapshot_complete(snapshot_filepath, txlog_dir):
     parsed_snapshot = read_zookeeper_snapshot(snapshot_filepath, 'base64', lambda f: False)
-    snapshot_tx_range = (parse_filename(Path(snapshot_filepath).name), parsed_snapshot['digest']['zxid'])
-    print(f"snapshot_tx_range: {snapshot_tx_range}")
+    snapshot_tx_range = (
+        # The zxid in the filename is the last transaction that we are sure happened BEFORE the snapshotting process
+        # so to correctly restore the fuzzy snapshot we need the transactions starting from this zxid + 1.
+        parse_filename(Path(snapshot_filepath).name) + 1,
+        # The digest zxid is the zxid of the last transaction that was processed before the digest was computed.
+        # To correctly restore the fuzzy snapshot we need at least all the transaction up to this zxid so that
+        # we can recreate the same data tree and compute the digest for comparison.
+        # Any tranasctions after this zxid are optional and simply provide us with a more up to date state.
+        parsed_snapshot['digest']['zxid']
+    )
     log_files = list_txlog_files(txlog_dir)
     available_continuous_tx_ranges = get_transaction_ranges(log_files)
-    print(f"available_continuous_tx_ranges: {available_continuous_tx_ranges}")
-    return any(is_subrange(snapshot_tx_range, r) for r in available_continuous_tx_ranges)
+    matches = [ r for r in available_continuous_tx_ranges if is_subrange(snapshot_tx_range, (r[0], r[1])) ]
+    if len(matches) == 0:
+        return { 'restorable': False }
+    elif len(matches) > 1:
+        raise RuntimeError("Log files overlap in transaction ranges!")
+    else:
+        return {
+            'restorable': True,
+            'log_files': [
+                {
+                    'name': Path(f['logfile']).name,
+                    'tx_count': f['last'] - f['first'] + 1,
+                    'lowest_zxid': f['first'],
+                    'highest_zxid': f['last'],
+                    'required': f['first'] <= snapshot_tx_range[1]
+                }
+                for f
+                in matches[0][2]
+            ]
+        }
 
 if __name__ == '__main__':
     main()

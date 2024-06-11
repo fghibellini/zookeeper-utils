@@ -320,22 +320,26 @@ def list_txlog_files(dir):
     print(sorted_result)
     return [ str(p) for (p,zxid) in sorted_result ]
 
-def get_zxid_range(parsed_txlog):
+def get_zxid_range(filename, parsed_txlog):
     if len(parsed_txlog) < 1:
         return None
-    return (parsed_txlog[0]['header']['zxid'], parsed_txlog[-1]['header']['zxid'])
+    return {
+        'logfile': filename,
+        'first': parsed_txlog[0]['header']['zxid'],
+        'last': parsed_txlog[-1]['header']['zxid']
+    }
 
 def get_transaction_ranges(files):
-    ranges = [ r for r in (get_zxid_range(read_zookeeper_txlog(file)) for file in files) if r != None ]
+    ranges = [ (x['first'], x['last'], [x]) for x in (get_zxid_range(file, read_zookeeper_txlog(file)) for file in files) if x != None ]
     if not ranges:
         return []
     merged = [ranges[0]]
-    for start,end in ranges[1:]:
-        top_start,top_end = merged[-1]
+    for start,end,files in ranges[1:]:
+        top_start,top_end,top_files = merged[-1]
         if start == top_end + 1:
-            merged[-1] = (top_start, end)
+            merged[-1] = (top_start, end, top_files + files)
         else:
-            merged.append((start,end))
+            merged.append((start,end,files))
     return merged
         
 

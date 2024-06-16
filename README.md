@@ -24,14 +24,18 @@ Parses a snapshot file and outputs in JSON format. Ideal for piping into [jq](ht
 This fails if any of the data is in the wrong format or if the checksums don't match.
 
 ```
-usage: zookeeper_snapshot.py parse [-h] [--string-data] filename
+usage: zookeeper_snapshot.py parse [-h] [--path-include [ZNODE_PATH_INCLUDE ...]] [--data-format {base64,text,json}] filename
 
 positional arguments:
-  filename       path to the snapshot file
+  filename              path to the snapshot file
 
 options:
-  -h, --help     show this help message and exit
-  --string-data  decode the znode's data as utf-8 strings
+  -h, --help            show this help message and exit
+  --path-include [ZNODE_PATH_INCLUDE ...]
+                        Paths to include. Use * as wildcard value.
+  --data-format {base64,text,json}
+                        format used to output the znode's data. "text" will parse the data as UTF-8 strings. Keep in mind that ALL the znodes must be encodable in this format so if you specify "json" you need to
+                        make sure that all your znodes contain valid JSON. See --path-include to filter.
 ```
 
 ### `validate`

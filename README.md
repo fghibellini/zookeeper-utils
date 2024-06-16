@@ -2,17 +2,18 @@
 # Zookeeper Snapshot Utility
 
 ```
-usage: zookeeper_snapshot.py [-h] {parse,validate} ...
+usage: zookeeper_snapshot.py [-h] {parse,checksum,validate} ...
 
 Zookeeper snapshot utilities
 
 positional arguments:
-  {parse,validate}
-    parse           parse a snapshot file
-    validate        computes an Adler32 checksum and compares it to the one at the end of the file
+  {parse,checksum,validate}
+    parse               parse a snapshot file
+    checksum            computes an Adler32 checksum and compares it to the one at the end of the file
+    validate            Validates that a snapshot in conjuction with the log files can be restored into a valid state
 
 options:
-  -h, --help        show this help message and exit
+  -h, --help            show this help message and exit
 ```
 
 ## Commands

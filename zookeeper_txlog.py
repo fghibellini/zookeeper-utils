@@ -317,7 +317,6 @@ def list_txlog_files(dir):
     files = ((p, parse_filename(p.name)) for p in dir_path.iterdir())
     unsorted = [ (p,zxid) for (p,zxid) in files if zxid != None ]
     sorted_result = sorted(unsorted, key = lambda x: x[1])
-    print(sorted_result)
     return [ str(p) for (p,zxid) in sorted_result ]
 
 def get_zxid_range(filename, parsed_txlog):

@@ -36,6 +36,35 @@ options:
 
 ### `validate`
 
+Extracts the last committed zxid when the snapshot started being generated from the snapshot filename (`LOWEST_ZXID`) and the zxid in the data-tree
+digest computed at the end of the snapshot generation process (`HIGHEST_ZXID`). It then goes over the available log files and checks that all the transactions
+between `LOWEST_ZXID` and `HIGHEST_ZXID` (inclusive) are available which is a requirement in order to correctly restore the state of ZooKeeper.
+
+```
+$ python3 zookeeper_snapshot.py validate ~/Downloads/snapshot.95e000ebfc1 --logdir ~/Downloads | jq
+{
+  "restorable": true,
+  "log_files": [
+    {
+      "name": "log.95e000d8b9e",
+      "tx_count": 78885,
+      "lowest_zxid": 10299332463518,
+      "highest_zxid": 10299332542402,
+      "required": true
+    },
+    {
+      "name": "log.95e000ebfc3",
+      "tx_count": 11683,
+      "lowest_zxid": 10299332542403,
+      "highest_zxid": 10299332554085,
+      "required": true
+    }
+  ]
+}
+```
+
+### `checksum`
+
 Computes Adler32 checksum of the snapshot and validates that it matches the one persisted at the end of the file.
 This can be used to check that the snapshot written fully - a common problem given that ZooKeeper makes no attempt
 at not exposing the snapshot files as they are beeing generated.
@@ -43,7 +72,7 @@ at not exposing the snapshot files as they are beeing generated.
 **Significantly faster than parsing the file.**
 
 ```
-usage: zookeeper_snapshot.py validate [-h] filename
+usage: zookeeper_snapshot.py checksum [-h] filename
 
 positional arguments:
   filename    path to the snapshot file

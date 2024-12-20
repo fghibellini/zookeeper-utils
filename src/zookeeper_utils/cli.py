@@ -68,7 +68,7 @@ def main():
         print(json.dumps(result, indent=4))
     elif args.subcmd == 'transaction-ranges':
         logdir = args.dir
-        tx_log_files = list_txlog_files("/Users/fghibellini/Downloads")
+        tx_log_files = list_txlog_files(logdir)
         print(json.dumps(get_transaction_ranges(tx_log_files), indent=4))
     elif args.subcmd == 'checksum':
         file_path = args.filename

@@ -1,27 +1,35 @@
 
 # Zookeeper Utils
 
+Provided both as 🐍 **Python library** and 💻 **CLI**.
+
 > 🚧 WORK IN PROGRESS 🚧
 >
 > Very much work in progress. I mostly got it to a point where it was able to process all the snapshots that we have at work.
-
-- [x] Inspect snapshots & transaction logs (currently only works with snapshots generated with `zookeeper.digest.enabled = true`, `zookeeper.serializeLastProcessedZxid.enabled = false` - this was introduced in ZK 3.9.0 prior versions would behave as if it was false)
-- [x] Compute integrity checks
-
-Provided both as 🐍 **Python library** and 💻 **CLI**.
+>
+> - [x] Inspect transaction logs
+> - [ ] Inspect snapshots
+>   - [x] basic parsing
+>   - [ ] support for `digest.enabled = false`
+>   - [ ] support for `serializeLastProcessedZxid.enabled = true` (introduced in ZK 3.9.0)
+> - [x] Compute integrity checks
+> - [ ] Compute state of DataTree after recovery (after applying the transactions on top of the fuzzy snapshot)
 
 ## CLI
 
 ```
-usage: zookeeper_snapshot.py [-h] {parse,checksum,validate-is-restorable} ...
+zk-utils --help
+usage: zk-utils [-h] {parse-snapshot,parse-log,transaction-ranges,checksum,is-restorable} ...
 
 Zookeeper snapshot utilities
 
 positional arguments:
-  {parse,checksum,validate}
-    parse                     parse a snapshot file
-    checksum                  computes an Adler32 checksum and compares it to the one at the end of the file
-    validate-is-restorable    Validates that a snapshot in conjuction with the log files can be restored into a valid state
+  {parse-snapshot,parse-log,transaction-ranges,checksum,is-restorable}
+    parse-snapshot      parse a snapshot file
+    parse-log           parse a txlog file
+    transaction-ranges  scan the log files in a directory and output the contiguous ranges of available transactions
+    checksum            computes an Adler32 checksum and compares it to the one at the end of the file
+    is-restorable       validates that a snapshot in conjuction with the log files can be restored into a valid state
 
 options:
   -h, --help            show this help message and exit
@@ -36,7 +44,7 @@ Parses a snapshot file and outputs in JSON format. Ideal for piping into [jq](ht
 This fails if any of the data is in the wrong format or if the checksums don't match.
 
 ```
-usage: zookeeper_snapshot.py parse [-h] [--path-include [ZNODE_PATH_INCLUDE ...]] [--data-format {base64,text,json}] filename
+usage: zk-utils parse-snapshot [-h] [--path-include [ZNODE_PATH_INCLUDE ...]] [--timestamp-format {numeric,iso}] [--data-format {base64,text,json}] filename
 
 positional arguments:
   filename              path to the snapshot file
@@ -45,6 +53,8 @@ options:
   -h, --help            show this help message and exit
   --path-include [ZNODE_PATH_INCLUDE ...]
                         Paths to include. Use * as wildcard value.
+  --timestamp-format {numeric,iso}
+                        format used to output timestamps. "numeric" will output timestamps as milliseconds since epoch. "iso" will output timestamps as ISO 8601 strings.
   --data-format {base64,text,json}
                         format used to output the znode's data. "text" will parse the data as UTF-8 strings. Keep in mind that ALL the znodes must be encodable in this format so if you specify "json" you need to
                         make sure that all your znodes contain valid JSON. See --path-include to filter.
@@ -52,7 +62,11 @@ options:
 
 <details>
 
-<summary>example output</summary>
+<summary>example invocation</summary>
+
+```bash
+zk-utils parse-snapshot ./example/data/version-2/snapshot.3
+```
 
 ```json
 {
@@ -197,28 +211,26 @@ options:
 
 #### `parse-log`
 
-Parses a snapshot file and outputs in JSON format. Ideal for piping into [jq](https://jqlang.github.io/jq/) for further processing.
-
-This fails if any of the data is in the wrong format or if the checksums don't match.
+Parses a transaction log file and outputs in JSON format. Ideal for piping into [jq](https://jqlang.github.io/jq/) for further processing.
 
 ```
-usage: zookeeper_snapshot.py parse [-h] [--path-include [ZNODE_PATH_INCLUDE ...]] [--data-format {base64,text,json}] filename
+
+usage: zk-utils parse-log [-h] filename
 
 positional arguments:
-  filename              path to the snapshot file
+  filename    path to the log file
 
 options:
-  -h, --help            show this help message and exit
-  --path-include [ZNODE_PATH_INCLUDE ...]
-                        Paths to include. Use * as wildcard value.
-  --data-format {base64,text,json}
-                        format used to output the znode's data. "text" will parse the data as UTF-8 strings. Keep in mind that ALL the znodes must be encodable in this format so if you specify "json" you need to
-                        make sure that all your znodes contain valid JSON. See --path-include to filter.
+  -h, --help  show this help message and exit
 ```
 
 <details>
 
-<summary>example output</summary>
+<summary>example invocation</summary>
+
+```bash
+zk-utils parse-log ./example/logs/version-2/log.1
+```
 
 ```json
 [
@@ -284,14 +296,80 @@ options:
 
 </details>
 
-#### `validate-is-restorable`
+#### `transaction-ranges`
+
+Scans the transaction log files and reports the contiguous ranges of transactions available.
+
+```
+usage: zk-utils transaction-ranges [-h] dir
+
+positional arguments:
+  dir         directory with log files
+
+options:
+  -h, --help  show this help message and exit
+```
+
+<details>
+
+<summary>example invocation</summary>
+
+```batch
+zk-utils transaction-ranges example/logs/version-2/
+```
+
+```json
+[
+    [
+        1,
+        4,
+        [
+            {
+                "logfile": "example/logs/version-2/log.1",
+                "first": 1,
+                "last": 3
+            },
+            {
+                "logfile": "example/logs/version-2/log.4",
+                "first": 4,
+                "last": 4
+            }
+        ]
+    ]
+]
+```
+
+</details>
+
+#### `is-restorable`
 
 Extracts the last committed zxid when the snapshot started being generated from the snapshot filename (`LOWEST_ZXID`) and the zxid in the data-tree
 digest computed at the end of the snapshot generation process (`HIGHEST_ZXID`). It then goes over the available log files and checks that all the transactions
 between `LOWEST_ZXID` and `HIGHEST_ZXID` (inclusive) are available which is a requirement in order to correctly restore the state of ZooKeeper.
 
+**TODO** how should this behave when multiple epochs are involved?
+
 ```
-$ python3 zookeeper_snapshot.py validate-is-restorable ~/Downloads/snapshot.95e000ebfc1 --logdir ~/Downloads | jq
+zk-utils is-restorable --help
+usage: zk-utils is-restorable [-h] [--logdir LOGDIR] snapshot
+
+positional arguments:
+  snapshot         path to snapshot file
+
+options:
+  -h, --help       show this help message and exit
+  --logdir LOGDIR  directory with log files
+```
+
+<details>
+
+<summary>example invocation</summary>
+
+```bash
+zk-utils is-restorable ./example/data/version-2/snapshot.3 --logdir ./example/logs/version-2 | jq
+```
+
+```json
 {
   "restorable": true,
   "log_files": [
@@ -313,16 +391,18 @@ $ python3 zookeeper_snapshot.py validate-is-restorable ~/Downloads/snapshot.95e0
 }
 ```
 
+</details>
+
 #### `checksum`
 
 Computes Adler32 checksum of the snapshot and validates that it matches the one persisted at the end of the file.
 This can be used to check that the snapshot written fully - a common problem given that ZooKeeper makes no attempt
 at not exposing the snapshot files as they are beeing generated.
 
-**Significantly faster than parsing the file.**
+**Significantly faster than fully parsing the file.**
 
 ```
-usage: zookeeper_snapshot.py checksum [-h] filename
+usage: zk-utils checksum [-h] filename
 
 positional arguments:
   filename    path to the snapshot file
@@ -330,6 +410,22 @@ positional arguments:
 options:
   -h, --help  show this help message and exit
 ```
+
+<details>
+
+<summary>example invocation</summary>
+
+```bash
+zk-utils checksum ./example/data/version-2/snapshot.3
+```
+
+```
+Expected Adler-32 checksum: 3571269761
+Computed Adler-32 checksum: 3571269761
+All OK
+```
+
+</details>
 
 ## Library
 
@@ -362,6 +458,8 @@ zookeeper-utils --help
 ```
 
 #### How to Generate a ZooKeeper Snapshot
+
+You can use the official [zookeeper](https://hub.docker.com/_/zookeeper) Docker image.
 
 ```
 $ mkdir -p example/{data,logs};
@@ -405,3 +503,6 @@ $ zk-utils parse-snapshot example/data/version-2/snapshot.*
     },
 ...
 ```
+
+- `serializeLastProcessedZxid.enabled=false` is used as support for this is not implemented yet
+- `preAllocSize=1` prevent ZooKeeper from preallocating huge transaction logs (we're only creating 3 transactions)

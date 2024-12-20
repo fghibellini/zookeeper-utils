@@ -293,7 +293,7 @@ def read_zookeeper_txlog(file_path):
                 }
 
             txlog_reader.skip(1) # end of transaction marker 0x42
-            
+
             tx_rec = {
                 'tx': tx,
                 'header': tx_header,
@@ -306,7 +306,7 @@ def read_zookeeper_txlog(file_path):
         # print(json.dumps(log_transactions, indent=4))
         return log_transactions
 
-            
+
 def list_txlog_files(dir):
     dir_path = pathlib.Path(dir)
     def parse_filename(basename):
@@ -340,10 +340,3 @@ def get_transaction_ranges(files):
         else:
             merged.append((start,end,files))
     return merged
-        
-
-if __name__ == '__main__':
-    tx_log_files = list_txlog_files("/Users/fghibellini/Downloads")
-    print(tx_log_files)
-    print(get_transaction_ranges(tx_log_files))
-    # read_zookeeper_txlog("/Users/fghibellini/Downloads/log.95e000d8b9e")

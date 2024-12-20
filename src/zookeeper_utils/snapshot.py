@@ -10,6 +10,7 @@ import json
 from base64 import b64encode
 from zookeeper_utils.txlog import list_txlog_files, get_transaction_ranges
 from pathlib import Path
+from datetime import datetime, timezone
 
 class SnapshotReader:
     '''
@@ -87,6 +88,67 @@ class SnapshotReader:
             raise RuntimeError(f"{label} not followed by '/'!")
         return checksum
 
+def snapshot_to_json(snapshot, timestamp_format = "numeric", znode_data_format = None):
+    """
+    Converts a parsed Zookeeper snapshot into a JSON-serializable dictionary.
+    """
+    def render_time(timestamp):
+        if timestamp_format == "numeric":
+            return timestamp
+        elif timestamp_format == "iso":
+            return datetime.fromtimestamp(timestamp / 1000, timezone.utc).isoformat() + "Z"
+        else:
+            raise ValueError(f"Invalid timestamp format: {timestamp_format}")
+
+    def header_to_json(header):
+        return {
+            'magic': header['magic'],
+            'version': header['version'],
+            'db_id': hex(header['db_id'])
+        }
+
+    def session_to_json(session):
+        return {
+            'id': hex(session['id']),
+            'timeout': session['timeout']
+        }
+
+    def stat_to_json(stat):
+        return {
+            'czxid': hex(stat['czxid']),
+            'mzxid': hex(stat['mzxid']),
+            'ctime': render_time(stat['ctime']),
+            'mtime': render_time(stat['mtime']),
+            'version': stat['version'],
+            'cversion': stat['cversion'],
+            'aversion': stat['aversion'],
+            'ephemeralOwner': hex(stat['ephemeralOwner']),
+            'pzxid': hex(stat['pzxid'])
+        }
+
+    def node_to_json(node):
+        return {
+            'path': node['path'],
+            'data': format_znode_data(node['data'], znode_data_format),
+            'acl': node['acl'],
+            'stat': stat_to_json(node['stat'])
+        }
+
+    def digest_to_json(digest):
+        return {
+            'zxid': hex(digest['zxid']),
+            'digest_version': digest['digest_version'],
+            'digest': hex(digest['digest'])
+        }
+
+    return {
+        'header': header_to_json(snapshot['header']),
+        'sessions': [ session_to_json(s) for s in snapshot['sessions'] ],
+        'ACLs': snapshot['ACLs'],
+        'nodes': [ node_to_json(n) for n in snapshot['nodes'] ],
+        'digest': digest_to_json(snapshot['digest'])
+    }
+
 def format_znode_data(node_data, format):
     if node_data == None:
         return None
@@ -97,7 +159,7 @@ def format_znode_data(node_data, format):
     if format == "json":
         return json.loads(node_data.decode("utf-8")) if len(node_data) > 0 else None
 
-def read_zookeeper_snapshot(file_path, znode_data_format, znode_path_filter):
+def read_zookeeper_snapshot(file_path, znode_path_filter):
     """
     Reads a Zookeeper snapshot file, computes Adler32 checksums for each chunk of data,
     and parses the data into a dictionary.
@@ -171,7 +233,7 @@ def read_zookeeper_snapshot(file_path, znode_data_format, znode_path_filter):
                 continue
             node = {
                 'path': node_path,
-                'data': format_znode_data(node_data, znode_data_format),
+                'data': node_data,
                 'acl': node_acl,
                 'stat': {
                     'czxid': czxid,
@@ -284,7 +346,7 @@ def is_subrange(contained, container):
     return a >= c and b <= d
 
 def validate_snapshot_complete(snapshot_filepath, txlog_dir):
-    parsed_snapshot = read_zookeeper_snapshot(snapshot_filepath, 'base64', lambda f: False)
+    parsed_snapshot = read_zookeeper_snapshot(snapshot_filepath, lambda f: False)
     snapshot_tx_range = (
         # The zxid in the filename is the last transaction that we are sure happened BEFORE the snapshotting process
         # so to correctly restore the fuzzy snapshot we need the transactions starting from this zxid + 1.

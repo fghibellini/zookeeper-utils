@@ -1,7 +1,7 @@
 from sys import argv
 import argparse
 import json
-from zookeeper_utils.snapshot import read_zookeeper_snapshot, validate_snapshot_complete, validate_adler32
+from zookeeper_utils.snapshot import read_zookeeper_snapshot, validate_snapshot_complete, validate_adler32, snapshot_to_json
 from zookeeper_utils.filter_globs import path_matches_glob
 from zookeeper_utils.txlog import read_zookeeper_txlog, list_txlog_files, get_transaction_ranges
 
@@ -21,6 +21,10 @@ def main():
     parser_parse_snapshot.set_defaults(subcmd="parse-snapshot")
     parser_parse_snapshot.add_argument('filename', help='path to the snapshot file')
     parser_parse_snapshot.add_argument('--path-include', dest='znode_path_include', nargs='*', help="Paths to include. Use * as wildcard value.")
+    parser_parse_snapshot.add_argument('--timestamp-format', dest='timestamp_format', action='store',
+    			choices=["numeric", "iso"],
+                        default="iso",
+                        help='format used to output timestamps. "numeric" will output timestamps as milliseconds since epoch. "iso" will output timestamps as ISO 8601 strings.')
     parser_parse_snapshot.add_argument('--data-format', dest='znode_data_format', action='store',
     			choices=["base64", "text", "json"],
                         default="text",
@@ -47,11 +51,17 @@ def main():
 
     if args.subcmd == 'parse-snapshot':
         znode_data_format = args.znode_data_format
+        timestamp_format = args.timestamp_format
         file_path = args.filename
         path_whitelist = args.znode_path_include if len(args.znode_path_include or []) > 0 else ["*"]
         whitelist_func = mk_filter_function_from_whitelist(path_whitelist)
-        result = read_zookeeper_snapshot(file_path, znode_data_format, whitelist_func)
-        print(json.dumps(result, indent=4))
+        result = read_zookeeper_snapshot(file_path, whitelist_func)
+        json_tree = snapshot_to_json(
+            result,
+            znode_data_format = znode_data_format,
+            timestamp_format = timestamp_format
+            )
+        print(json.dumps(json_tree, indent=4))
     elif args.subcmd == 'parse-log':
         file_path = args.filename
         result = read_zookeeper_txlog(file_path)

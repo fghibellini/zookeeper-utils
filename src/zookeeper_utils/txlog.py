@@ -1,5 +1,4 @@
 import zlib
-import json
 import struct
 from enum import Enum
 import pathlib

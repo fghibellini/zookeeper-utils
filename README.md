@@ -1,5 +1,5 @@
 
-# Zookeeper Utils
+# ZooKeeper Utils
 
 Provided both as 🐍 **Python library** and 💻 **CLI**.
 
@@ -15,7 +15,7 @@ Provided both as 🐍 **Python library** and 💻 **CLI**.
 > - [x] Compute integrity checks
 > - [ ] Compute state of DataTree after recovery (after applying the transactions on top of the fuzzy snapshot)
 
-## CLI
+## 💻 CLI
 
 ```
 zk-utils --help
@@ -427,7 +427,7 @@ All OK
 
 </details>
 
-## Library
+## 📚 Library
 
 ```python
 from zookeeper_utils import list_txlog_files, get_transaction_ranges, read_zookeeper_txlog, validate_snapshot_complete, validate_adler32, read_zookeeper_snapshot
@@ -435,14 +435,14 @@ from zookeeper_utils import list_txlog_files, get_transaction_ranges, read_zooke
 
 **TODO** Until reference docs are made available see the module [`cli.py`](./src/zookeeper_utils/cli.py) for examples of invocations.
 
-### Development
+## ⚙️ Development
 
-#### Setup
+### Setup
 
 - This project has a `pyproject.toml` file (see [StackOverflow Answer](https://stackoverflow.com/a/66472800/3343425)).
 - Inside of it, we declare that we use [setup-tools](https://setuptools.pypa.io/en/latest/userguide/quickstart.html) as our _build-backend_.
 
-#### Running the CLI
+### Running the CLI
 
 To run the CLI tool directly from the project directory you can take advantage of [setup-tool's Development Mode](https://setuptools.pypa.io/en/latest/userguide/development_mode.html):
 
@@ -457,7 +457,7 @@ pip install -e .
 zookeeper-utils --help
 ```
 
-#### How to Generate a ZooKeeper Snapshot
+### How to Generate a ZooKeeper Snapshot
 
 You can use the official [zookeeper](https://hub.docker.com/_/zookeeper) Docker image.
 

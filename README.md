@@ -39,6 +39,22 @@ pipx run zookeeper-utils parse-snapshot ./example/data/version-2/snapshot.3 | jq
 - [x] Compute integrity checks
 - [ ] Compute state of DataTree after recovery (after applying the transactions on top of the fuzzy snapshot)
 
+## Table Of Contents
+
+- [CLI](#-cli)
+- [Commands](#Commands)
+    - [parse-snapshot](#parse-snapshot) - parse a snapshot file
+    - [parse-log](#parse-log) - parse a txlog file
+    - [transaction-ranges](#transaction-ranges) - scan the log files in a directory and output the contiguous ranges of available transactions
+    - [checksum](#checksum) - computes an Adler32 checksum and compares it to the one at the end of the file
+    - [is-restorable](#is-restorable) - validates that a snapshot in conjuction with the log files can be restored into a valid state
+- [Library](#-library)
+- [Development](#-development)
+    - [Setup](#setup)
+    - [Running the CLI](#running-the-cli)
+    - [Publishing](#publishing)
+    - [How to Generate a ZooKeeper Snapshot](#how-to-generate-a-zookeeper-snapshot)
+
 ## 💻 CLI
 
 ```
@@ -60,12 +76,6 @@ options:
 ```
 
 ### Commands
-
-- [parse-snapshot](#parse-snapshot) - parse a snapshot file
-- [parse-log](#parse-log) - parse a txlog file
-- [transaction-ranges](#transaction-ranges) - scan the log files in a directory and output the contiguous ranges of available transactions
-- [checksum](#checksum) - computes an Adler32 checksum and compares it to the one at the end of the file
-- [is-restorable](#is-restorable) - validates that a snapshot in conjuction with the log files can be restored into a valid state
 
 #### `parse-snapshot`
 
